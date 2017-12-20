@@ -25,23 +25,27 @@ env.seed(args.seed)
 
 HIDDEN_SIZE = 128
 
-def normalize_rewards(raw_rewards):
+# apply the discount
+def apply_discount(raw_rewards):
   R = 0
   rewards = []
   for r in raw_rewards:
       # apply the discount
       R = r + args.gamma * R
       rewards.insert(0, R)
+  return rewards
 
-  # give rewards a zero mean, and a std of 1
+# give rewards a zero mean, and a std of 1
+def normalize_rewards(raw_rewards):
   rewards = np.array(rewards)
   rewards = (rewards - rewards.mean()) / (rewards.std() + np.finfo(np.float32).eps)
-
   return rewards
 
 def finish_episode(ep_rewards, ep_actions, ep_states):
-  rewards = normalize_rewards(ep_rewards)
+  rewards = apply_discount(ep_rewards)
+  rewards = normalize_rewards(rewards)
   for index in range(np.size(ep_rewards)):
+    # here is where we need the magic to happen...
     workspace.RunNet(backward_net)
 
   return True;
