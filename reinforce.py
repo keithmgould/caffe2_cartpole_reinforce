@@ -41,8 +41,8 @@ def normalize_rewards(raw_rewards):
 
 def finish_episode(ep_rewards, ep_actions, ep_states):
   rewards = normalize_rewards(ep_rewards)
-  # for index in np.size(ep_rewards):
-    # workspace.RunNet(train_net.Proto().name)
+  for index in range(np.size(ep_rewards)):
+    workspace.RunNet(backward_net)
 
   return True;
 
@@ -80,7 +80,7 @@ ITER = backward_init_net.ConstantFill([], "ITER", shape=[1], value=0, dtype=core
 ONE = backward_init_net.ConstantFill([], "ONE", shape=[1], value=1.)
 
 # Compute the learning rate that corresponds to the iteration.
-LR = backward_net.LearningRate(ITER, "LR", base_lr=-0.1, policy="step", stepsize=20, gamma=0.9)
+# LR = backward_net.LearningRate(ITER, "LR", base_lr=-0.1, policy="step", stepsize=20, gamma=0.9)
 
 # Increment the iteration by one.
 backward_net.Iter(ITER, ITER)
@@ -132,7 +132,6 @@ for i_episode in count(1):
             break
 
     avg_t = np.append(avg_t, t)
-    workspace.RunNet(backward_net)
     finish_episode(ep_rewards, ep_actions, ep_states)
     print("t: {}, avg_t: {}".format(t, avg_t.mean()))
     exit()
