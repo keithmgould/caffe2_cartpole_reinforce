@@ -41,8 +41,8 @@ def normalize_rewards(raw_rewards):
 
 def finish_episode(ep_rewards, ep_actions, ep_states):
   rewards = normalize_rewards(ep_rewards)
-  for index in np.size(ep_rewards):
-    workspace.RunNet(train_net.Proto().name)
+  # for index in np.size(ep_rewards):
+    # workspace.RunNet(train_net.Proto().name)
 
   return True;
 
@@ -55,27 +55,52 @@ def select_action(prediction):
 
 avg_t = np.array([])
 
-workspace.CreateBlob('loss')
+workspace.CreateBlob('prediction')
 
 input_data = np.random.rand(1, 4).astype(np.float32)
 workspace.FeedBlob("input_data", input_data)
 
-model = model_helper.ModelHelper(name="train")
-init_net = model.param_init_net
-train_net = model.net
+forward_model = model_helper.ModelHelper(name="forward")
+forward_init_net = forward_model.param_init_net
+forward_net = forward_model.net
 
-brew.fc(model, 'input_data', 'hidden', 4, HIDDEN_SIZE)
-brew.relu(model, 'hidden', 'hidden')
-brew.fc(model, 'hidden', 'prediction', HIDDEN_SIZE, 1)
-model.Sigmoid('prediction', 'prediction')
+brew.fc(forward_model, 'input_data', 'hidden', 4, HIDDEN_SIZE)
+brew.relu(forward_model, 'hidden', 'hidden')
+brew.fc(forward_model, 'hidden', 'prediction', HIDDEN_SIZE, 1)
+forward_model.Sigmoid('prediction', 'prediction')
 
-workspace.RunNetOnce(init_net)
-workspace.CreateNet(train_net)
+backward_model = model_helper.ModelHelper(name="backward")
+backward_init_net = backward_model.param_init_net
+backward_net = backward_model.net
 
-graph = net_drawer.GetPydotGraph(train_net.Proto().op, "train", rankdir="LR")
-graph.write_png('rf1.png', prog='dot')
+# ITER is the iterator count.
+ITER = backward_init_net.ConstantFill([], "ITER", shape=[1], value=0, dtype=core.DataType.INT32)
 
-exit()
+# Constant value ONE is used in weighted sum when updating parameters.
+ONE = backward_init_net.ConstantFill([], "ONE", shape=[1], value=1.)
+
+# Compute the learning rate that corresponds to the iteration.
+LR = backward_net.LearningRate(ITER, "LR", base_lr=-0.1, policy="step", stepsize=20, gamma=0.9)
+
+# Increment the iteration by one.
+backward_net.Iter(ITER, ITER)
+
+# Run the init nets once
+workspace.RunNetOnce(forward_init_net)
+workspace.RunNetOnce(backward_init_net)
+
+# Create the forward and backward nets
+workspace.CreateNet(forward_net)
+workspace.CreateNet(backward_net)
+
+print("Current network proto:\n\n{}".format(backward_net.Proto()))
+print("Current blobs in the workspace: {}".format(workspace.Blobs()))
+
+graph = net_drawer.GetPydotGraph(forward_net.Proto().op, "forward", rankdir="LR")
+graph.write_png('forward.png', prog='dot')
+
+graph = net_drawer.GetPydotGraph(backward_net.Proto().op, "backward", rankdir="LR")
+graph.write_png('backward.png', prog='dot')
 
 for i_episode in count(1):
     state = env.reset()
@@ -88,7 +113,7 @@ for i_episode in count(1):
         env.render() if args.render else False
         scrubbed_state = state.reshape(1,4).astype(np.float32)
         workspace.FeedBlob("input_data", scrubbed_state)
-        workspace.RunNet(train_net)
+        workspace.RunNet(forward_net)
         prediction = workspace.FetchBlob('prediction')
         action = select_action(prediction)
         state, reward, done, _ = env.step(action)
@@ -107,5 +132,7 @@ for i_episode in count(1):
             break
 
     avg_t = np.append(avg_t, t)
+    workspace.RunNet(backward_net)
     finish_episode(ep_rewards, ep_actions, ep_states)
     print("t: {}, avg_t: {}".format(t, avg_t.mean()))
+    exit()
