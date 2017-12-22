@@ -37,16 +37,30 @@ def apply_discount(raw_rewards):
 
 # give rewards a zero mean, and a std of 1
 def normalize_rewards(raw_rewards):
-  rewards = np.array(rewards)
+  rewards = np.array(raw_rewards)
   rewards = (rewards - rewards.mean()) / (rewards.std() + np.finfo(np.float32).eps)
   return rewards
 
-def finish_episode(ep_rewards, ep_actions, ep_states):
+def calculate_loss(rewards, ep_predictions):
+  loss = 0
+  natural_log_predictions = np.log(ep_predictions)
+  for i in range(np.size(rewards)):
+    foo = rewards[i] * natural_log_predictions[i]
+    loss += foo
+
+  return loss
+
+def finish_episode(ep_rewards, ep_predictions):
   rewards = apply_discount(ep_rewards)
   rewards = normalize_rewards(rewards)
+
+  new_loss = calculate_loss(rewards, ep_predictions)
+  print("loss: {}".format(new_loss))
+
   for index in range(np.size(ep_rewards)):
-    # here is where we need the magic to happen...
-    workspace.RunNet(backward_net)
+    reward = np.array([ep_rewards[index]])
+    workspace.FeedBlob("loss", new_loss)
+    workspace.RunNet(full_net)
 
   return True;
 
@@ -58,8 +72,6 @@ def select_action(prediction):
     return 1
 
 avg_t = np.array([])
-
-workspace.CreateBlob('prediction')
 
 input_data = np.random.rand(1, 4).astype(np.float32)
 workspace.FeedBlob("input_data", input_data)
@@ -73,45 +85,40 @@ brew.relu(forward_model, 'hidden', 'hidden')
 brew.fc(forward_model, 'hidden', 'prediction', HIDDEN_SIZE, 1)
 forward_model.Sigmoid('prediction', 'prediction')
 
-backward_model = model_helper.ModelHelper(name="backward")
-backward_init_net = backward_model.param_init_net
-backward_net = backward_model.net
+full_model = model_helper.ModelHelper(name="full")
+full_init_net = full_model.param_init_net
+full_net = full_model.net
+loss = full_net.ConstantFill([], "loss", shape=[1], value=0.0)
+ONE = full_net.ConstantFill([], "ONE", shape=[1], value=1.)
 
-# ITER is the iterator count.
-ITER = backward_init_net.ConstantFill([], "ITER", shape=[1], value=0, dtype=core.DataType.INT32)
-
-# Constant value ONE is used in weighted sum when updating parameters.
-ONE = backward_init_net.ConstantFill([], "ONE", shape=[1], value=1.)
-
-# Compute the learning rate that corresponds to the iteration.
-# LR = backward_net.LearningRate(ITER, "LR", base_lr=-0.1, policy="step", stepsize=20, gamma=0.9)
-
-# Increment the iteration by one.
-backward_net.Iter(ITER, ITER)
+brew.fc(full_model, 'input_data', 'hidden', 4, HIDDEN_SIZE)
+brew.relu(full_model, 'hidden', 'hidden')
+brew.fc(full_model, 'hidden', 'prediction', HIDDEN_SIZE, 1)
+full_model.Sigmoid('prediction', 'prediction')
+gradient_map = full_net.AddGradientOperators(['loss'])
+# full_net.WeightedSum(['prediction_w', ONE, gradient_map['prediction_w'], ONE], 'prediction_w')
+# full_net.WeightedSum(['prediction_b', ONE, gradient_map['prediction_w'], ONE], 'prediction_b')
 
 # Run the init nets once
 workspace.RunNetOnce(forward_init_net)
-workspace.RunNetOnce(backward_init_net)
+workspace.RunNetOnce(full_init_net)
 
-# Create the forward and backward nets
+# Create the forward and full nets
 workspace.CreateNet(forward_net)
-workspace.CreateNet(backward_net)
-
-print("Current network proto:\n\n{}".format(backward_net.Proto()))
-print("Current blobs in the workspace: {}".format(workspace.Blobs()))
+workspace.CreateNet(full_net)
 
 graph = net_drawer.GetPydotGraph(forward_net.Proto().op, "forward", rankdir="LR")
 graph.write_png('forward.png', prog='dot')
 
-graph = net_drawer.GetPydotGraph(backward_net.Proto().op, "backward", rankdir="LR")
-graph.write_png('backward.png', prog='dot')
+graph = net_drawer.GetPydotGraph(full_net.Proto().op, "full", rankdir="LR")
+graph.write_png('full.png', prog='dot')
 
 for i_episode in count(1):
-    state = env.reset()
     ep_rewards = []
     ep_states = []
     ep_actions = []
     ep_predictions = []
+    state = env.reset()
 
     for t in range(1000):
         env.render() if args.render else False
@@ -136,6 +143,6 @@ for i_episode in count(1):
             break
 
     avg_t = np.append(avg_t, t)
-    finish_episode(ep_rewards, ep_actions, ep_states)
+    finish_episode(ep_rewards, ep_predictions)
     print("t: {}, avg_t: {}".format(t, avg_t.mean()))
-    exit()
+    exit() # tmp!! just so I can stop after one episode
