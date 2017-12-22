@@ -45,9 +45,7 @@ def calculate_loss(rewards, ep_predictions):
   loss = 0
   natural_log_predictions = np.log(ep_predictions)
   for i in range(np.size(rewards)):
-    foo = rewards[i] * natural_log_predictions[i]
-    loss += foo
-
+    loss += rewards[i] * natural_log_predictions[i]
   return loss
 
 def finish_episode(ep_rewards, ep_predictions):
